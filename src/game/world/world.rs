@@ -7,8 +7,9 @@ use noise::{NoiseFn, Perlin};
 use sola_raylib::prelude::*;
 
 use crate::game_engine::GameObject;
+use crate::game_engine::collision::{Collision, CollisionRect, CollisionShape};
 
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Default, Debug)]
 pub enum Tile {
     #[default]
     Empty,
@@ -18,6 +19,24 @@ pub enum Tile {
     Sand,
 }
 
+pub struct TileCollider {
+    pub tile: Tile,
+    pub position: Vector2,
+    pub size: Vector2,
+}
+
+impl Collision for TileCollider {
+    fn collision_shape(&self) -> CollisionShape {
+        CollisionShape::Rectangle(CollisionRect {
+            position: self.position,
+            size: self.size,
+        })
+    }
+
+    fn collision_enabled(&self) -> bool {
+        matches!(self.tile, Tile::Water | Tile::Empty)
+    }
+}
 pub struct World {
     map: Vec<Vec<Tile>>,
     tile_size: Vector2,
@@ -138,9 +157,54 @@ impl World {
         0.0
     }
 
-    pub fn is_tile_walkable(&self, position: &Vector2) -> bool {
-        self.get_tile_at(position)
-            .is_some_and(|tile| tile != Tile::Water && tile != Tile::Empty)
+    pub fn get_tile_colliders(&self, collision_shape: CollisionShape) -> Vec<TileCollider> {
+        let (min, max) = match collision_shape {
+            CollisionShape::Rectangle(rect) => (
+                Vector2 {
+                    x: rect.position.x,
+                    y: rect.position.y,
+                },
+                Vector2 {
+                    x: rect.position.x + rect.size.x,
+                    y: rect.position.y + rect.size.y,
+                },
+            ),
+            CollisionShape::Circle(circle) => (
+                Vector2 {
+                    x: circle.position.x - circle.radius,
+                    y: circle.position.y - circle.radius,
+                },
+                Vector2 {
+                    x: circle.position.x + circle.radius,
+                    y: circle.position.y + circle.radius,
+                },
+            ),
+        };
+
+        let (x_min, y_min) = self.pixel_to_world(min.x, min.y);
+        let (x_man, y_max) = self.pixel_to_world(max.x, max.y);
+
+        let mut colliders = Vec::new();
+
+        for y in y_min..=y_max {
+            for x in x_min..=x_man {
+                let tile = if x < self.map[0].len() && y < self.map.len() {
+                    self.map[y][x]
+                } else {
+                    Tile::Empty
+                };
+
+                colliders.push(TileCollider {
+                    tile,
+                    position: Vector2 {
+                        x: x as f32 * self.tile_size.x,
+                        y: y as f32 * self.tile_size.y,
+                    },
+                    size: self.tile_size,
+                });
+            }
+        }
+        colliders
     }
 }
 

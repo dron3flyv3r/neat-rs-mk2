@@ -1,7 +1,7 @@
+pub mod collision;
 pub mod game_manager;
 
 use std::cell::RefCell;
-use std::ops::Mul;
 use std::rc::Rc;
 
 use sola_raylib::prelude::*;

@@ -1,6 +1,7 @@
 use sola_raylib::prelude::*;
 
 use crate::game::world::world::{Tile, World};
+use crate::game_engine::collision::{Collision, CollisionCircle, CollisionResult, CollisionShape};
 
 pub struct Creature {
     position: Vector2,
@@ -108,15 +109,13 @@ impl Creature {
             _ => self.speed,
         };
 
-        let new_position = self.position
-            + Vector2 {
-                x: movement_dir.x * speed * delta_time,
-                y: movement_dir.y * speed * delta_time,
-            };
+        let mut movement_delta = Vector2 {
+            x: movement_dir.x * speed * delta_time,
+            y: movement_dir.y * speed * delta_time,
+        };
 
-        if world.is_tile_walkable(&new_position) {
-            self.position = new_position;
-        }
+        // Check for collisions with the world
+        self.move_and_collide(world, movement_delta);
 
         self.current_stats.hunger -= self.consumption_rates.food * delta_time;
         self.current_stats.thirst -= self.consumption_rates.water * delta_time;
@@ -169,5 +168,42 @@ impl Creature {
         } else {
             self.current_stats.thirst += amount;
         }
+    }
+
+    fn move_and_collide(&mut self, world: &World, delta: Vector2) {
+        // X
+        let mut test = self.position;
+        test.x += delta.x;
+
+        for tile in world.get_tile_colliders(self.collision_shape()) {
+            if let Some(c) = self.check_collision_at_position(&tile, &test) {
+                test.x += c.correction_vector.x;
+            }
+        }
+        self.position.x = test.x;
+
+        // Y
+        let mut test = self.position;
+        test.y += delta.y;
+
+        for tile in world.get_tile_colliders(self.collision_shape()) {
+            if let Some(c) = self.check_collision_at_position(&tile, &test) {
+                test.y += c.correction_vector.y;
+            }
+        }
+        self.position.y = test.y;
+    }
+}
+
+impl Collision for Creature {
+    fn collision_shape(&self) -> CollisionShape {
+        CollisionShape::Circle(CollisionCircle {
+            position: self.position,
+            radius: self.size,
+        })
+    }
+
+    fn collision_enabled(&self) -> bool {
+        true
     }
 }
