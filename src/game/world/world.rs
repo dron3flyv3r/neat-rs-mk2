@@ -21,16 +21,12 @@ pub enum Tile {
 
 pub struct TileCollider {
     pub tile: Tile,
-    pub position: Vector2,
-    pub size: Vector2,
+    pub collision_shape: CollisionShape,
 }
 
 impl Collision for TileCollider {
-    fn collision_shape(&self) -> CollisionShape {
-        CollisionShape::Rectangle(CollisionRect {
-            position: self.position,
-            size: self.size,
-        })
+    fn collision_shape(&mut self) -> CollisionShape {
+        self.collision_shape.clone()
     }
 
     fn collision_enabled(&self) -> bool {
@@ -88,8 +84,8 @@ impl World {
 
     fn pixel_to_world(&self, x: f32, y: f32) -> (usize, usize) {
         (
-            (x / self.tile_size.x) as usize,
-            (y / self.tile_size.y) as usize,
+            (x / self.tile_size.x).clamp(0.0, self.map[0].len() as f32 * self.tile_size.x) as usize,
+            (y / self.tile_size.y).clamp(0.0, self.map.len() as f32 * self.tile_size.y) as usize,
         )
     }
 
@@ -157,16 +153,16 @@ impl World {
         0.0
     }
 
-    pub fn get_tile_colliders(&self, collision_shape: CollisionShape) -> Vec<TileCollider> {
+    pub fn get_tile_colliders(&self, collision_shape: &CollisionShape) -> Vec<TileCollider> {
         let (min, max) = match collision_shape {
             CollisionShape::Rectangle(rect) => (
                 Vector2 {
-                    x: rect.position.x,
-                    y: rect.position.y,
+                    x: rect.position.x - rect.size.x / 2.0,
+                    y: rect.position.y - rect.size.y / 2.0,
                 },
                 Vector2 {
-                    x: rect.position.x + rect.size.x,
-                    y: rect.position.y + rect.size.y,
+                    x: rect.position.x + rect.size.x / 2.0,
+                    y: rect.position.y + rect.size.y / 2.0,
                 },
             ),
             CollisionShape::Circle(circle) => (
@@ -181,8 +177,9 @@ impl World {
             ),
         };
 
-        let (x_min, y_min) = self.pixel_to_world(min.x, min.y);
-        let (x_man, y_max) = self.pixel_to_world(max.x, max.y);
+        let padding = 3.0; // Add some padding to ensure we get all relevant tiles
+        let (x_min, y_min) = self.pixel_to_world(min.x - padding, min.y - padding);
+        let (x_man, y_max) = self.pixel_to_world(max.x + padding, max.y + padding);
 
         let mut colliders = Vec::new();
 
@@ -193,14 +190,17 @@ impl World {
                 } else {
                     Tile::Empty
                 };
+                let position = Vector2 {
+                    x: (x as f32 + 0.5) * self.tile_size.x,
+                    y: (y as f32 + 0.5) * self.tile_size.y,
+                };
+                let size = self.tile_size;
 
                 colliders.push(TileCollider {
                     tile,
-                    position: Vector2 {
-                        x: x as f32 * self.tile_size.x,
-                        y: y as f32 * self.tile_size.y,
-                    },
-                    size: self.tile_size,
+                    collision_shape: CollisionShape::Rectangle(CollisionRect::new(
+                        position, 0.0, size,
+                    )),
                 });
             }
         }

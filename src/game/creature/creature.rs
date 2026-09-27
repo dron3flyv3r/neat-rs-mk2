@@ -1,13 +1,16 @@
 use sola_raylib::prelude::*;
 
 use crate::game::world::world::{Tile, World};
-use crate::game_engine::collision::{Collision, CollisionCircle, CollisionResult, CollisionShape};
+use crate::game_engine::collision::{
+    Collision, CollisionCircle, CollisionRect, CollisionResult, CollisionShape,
+};
 
 pub struct Creature {
     position: Vector2,
     color: Color,
     speed: f32,
     size: f32,
+    collision_shape: CollisionShape,
     base_stats: Stats,
     current_stats: Stats,
     consumption_rates: ConsumtionRates,
@@ -15,11 +18,15 @@ pub struct Creature {
 
 impl Default for Creature {
     fn default() -> Self {
+        let position = Vector2 { x: 0.0, y: 0.0 };
+        let size = 10.0;
+
         Self {
-            position: Vector2 { x: 0.0, y: 0.0 },
+            position,
+            size,
             color: Color::BLUE,
             speed: 100.0,
-            size: 10.0,
+            collision_shape: CollisionShape::Circle(CollisionCircle::new(position, size)),
             base_stats: Stats {
                 health: 100.0,
                 hunger: 100.0,
@@ -66,9 +73,12 @@ impl Creature {
 
         let color = *colors.get(rand::random_range(0..colors.len() - 1)).unwrap();
 
+        let collision_shape = CollisionShape::Circle(CollisionCircle::new(position, size));
+
         Self {
             position,
             current_stats: base_stats.clone(),
+            collision_shape,
             base_stats,
             consumption_rates,
             color,
@@ -109,13 +119,13 @@ impl Creature {
             _ => self.speed,
         };
 
-        let mut movement_delta = Vector2 {
+        let movement_delta = Vector2 {
             x: movement_dir.x * speed * delta_time,
             y: movement_dir.y * speed * delta_time,
         };
 
         // Check for collisions with the world
-        self.move_and_collide(world, movement_delta);
+        self.move_and_collide(world, &movement_delta);
 
         self.current_stats.hunger -= self.consumption_rates.food * delta_time;
         self.current_stats.thirst -= self.consumption_rates.water * delta_time;
@@ -133,10 +143,10 @@ impl Creature {
         if !self.is_alive() {
             println!("Creature has died.");
         } else {
-            println!(
-                "Creature Stats - Health: {}, Hunger: {}, Thirst: {}",
-                self.current_stats.health, self.current_stats.hunger, self.current_stats.thirst
-            );
+            // println!(
+            //     "Creature Stats - Health: {}, Hunger: {}, Thirst: {}",
+            //     self.current_stats.health, self.current_stats.hunger, self.current_stats.thirst
+            // );
         }
     }
 
@@ -170,13 +180,13 @@ impl Creature {
         }
     }
 
-    fn move_and_collide(&mut self, world: &World, delta: Vector2) {
+    fn move_and_collide(&mut self, world: &World, delta: &Vector2) {
         // X
         let mut test = self.position;
         test.x += delta.x;
 
-        for tile in world.get_tile_colliders(self.collision_shape()) {
-            if let Some(c) = self.check_collision_at_position(&tile, &test) {
+        for tile in &mut world.get_tile_colliders(&self.collision_shape()) {
+            if let Some(c) = self.check_collision_at_position(tile, &test) {
                 test.x += c.correction_vector.x;
             }
         }
@@ -186,8 +196,8 @@ impl Creature {
         let mut test = self.position;
         test.y += delta.y;
 
-        for tile in world.get_tile_colliders(self.collision_shape()) {
-            if let Some(c) = self.check_collision_at_position(&tile, &test) {
+        for tile in &mut world.get_tile_colliders(&self.collision_shape()) {
+            if let Some(c) = self.check_collision_at_position(tile, &test) {
                 test.y += c.correction_vector.y;
             }
         }
@@ -196,11 +206,15 @@ impl Creature {
 }
 
 impl Collision for Creature {
-    fn collision_shape(&self) -> CollisionShape {
-        CollisionShape::Circle(CollisionCircle {
-            position: self.position,
-            radius: self.size,
-        })
+    fn collision_shape(&mut self) -> CollisionShape {
+        let collision_shape = match &mut self.collision_shape {
+            CollisionShape::Circle(circle) => circle,
+            _ => panic!("Creature collision shape must be a rectangle"),
+        };
+        collision_shape.update_position(self.position);
+        collision_shape.update_radius(self.size);
+
+        self.collision_shape.clone()
     }
 
     fn collision_enabled(&self) -> bool {

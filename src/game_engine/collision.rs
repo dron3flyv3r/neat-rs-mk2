@@ -1,19 +1,25 @@
+use std::array;
+
 use sola_raylib::prelude::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CollisionRect {
-    // The position of the top-left corner of the rectangle
+    // Center of the rectangle
     pub position: Vector2,
+    pub rotation: f32,
     pub size: Vector2,
+
+    local_points: [Vector2; 4],
+    normals: [Vector2; 2],
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CollisionCircle {
     pub position: Vector2,
     pub radius: f32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CollisionShape {
     Rectangle(CollisionRect),
     Circle(CollisionCircle),
@@ -23,12 +29,102 @@ pub struct CollisionResult {
     pub correction_vector: Vector2,
 }
 
+impl CollisionRect {
+    pub fn new(position: Vector2, rotation: f32, size: Vector2) -> Self {
+        let mut object = Self {
+            position,
+            size,
+            rotation,
+            local_points: array::from_fn(|_| Vector2 { x: 0.0, y: 0.0 }),
+            normals: array::from_fn(|_| Vector2 { x: 0.0, y: 0.0 }),
+        };
+
+        object.update_local_points();
+        object.update_normals();
+        object
+    }
+
+    pub fn update_position(&mut self, position: Vector2) {
+        if position == self.position {
+            return;
+        }
+        self.position = position;
+    }
+
+    pub fn update_rotation(&mut self, rotation: f32) {
+        if rotation == self.rotation {
+            return;
+        }
+        self.rotation = rotation;
+        self.update_normals();
+    }
+
+    pub fn update_size(&mut self, size: Vector2) {
+        if size == self.size {
+            return;
+        }
+        self.size = size;
+        self.update_local_points();
+    }
+
+    fn update_local_points(&mut self) {
+        let hx = self.size.x / 2.0;
+        let hy = self.size.y / 2.0;
+        self.local_points = [
+            Vector2 { x: -hx, y: hy },
+            Vector2 { x: hx, y: hy },
+            Vector2 { x: hx, y: -hy },
+            Vector2 { x: -hx, y: -hy },
+        ];
+    }
+
+    pub fn get_world_points(&self) -> [Vector2; 4] {
+        self.local_points
+            .map(|p| p.rotated(self.rotation) + self.position)
+    }
+
+    pub fn get_local_points(&self) -> [Vector2; 4] {
+        self.local_points
+    }
+
+    fn update_normals(&mut self) {
+        self.normals = [
+            Vector2 { x: 0.0, y: 1.0 }.rotated(self.rotation),
+            Vector2 { x: -1.0, y: 0.0 }.rotated(self.rotation),
+        ];
+    }
+
+    pub fn get_normals(&self) -> [Vector2; 2] {
+        self.normals
+    }
+}
+
+impl CollisionCircle {
+    pub fn new(position: Vector2, radius: f32) -> Self {
+        Self { position, radius }
+    }
+
+    pub fn update_position(&mut self, position: Vector2) {
+        if position == self.position {
+            return;
+        }
+        self.position = position;
+    }
+
+    pub fn update_radius(&mut self, radius: f32) {
+        if radius == self.radius {
+            return;
+        }
+        self.radius = radius;
+    }
+}
+
 pub trait Collision {
-    fn collision_shape(&self) -> CollisionShape;
+    fn collision_shape(&mut self) -> CollisionShape;
 
     fn collision_enabled(&self) -> bool;
 
-    fn is_colliding<T: Collision>(&self, other: &T) -> Option<CollisionResult> {
+    fn is_colliding<T: Collision>(&mut self, other: &mut T) -> Option<CollisionResult> {
         if !self.collision_enabled() || !other.collision_enabled() {
             return None;
         }
@@ -38,8 +134,8 @@ pub trait Collision {
     }
 
     fn check_collision_at_position<T: Collision>(
-        &self,
-        other: &T,
+        &mut self,
+        other: &mut T,
         position: &Vector2,
     ) -> Option<CollisionResult> {
         if !self.collision_enabled() || !other.collision_enabled() {
@@ -91,60 +187,67 @@ impl CollisionShape {
         }
     }
 
+    fn project_points_onto_vector(points: &[Vector2], vector: &Vector2) -> (f32, f32) {
+        let mut min = f32::MAX;
+        let mut max = f32::MIN;
+
+        for point in points {
+            let projection = point.x * vector.x + point.y * vector.y;
+
+            min = min.min(projection);
+            max = max.max(projection);
+        }
+
+        (min, max)
+    }
+
     fn rect_vs_rect(rect1: &CollisionRect, rect2: &CollisionRect) -> Option<CollisionResult> {
-        let rect1_right = rect1.position.x + rect1.size.x;
-        let rect1_bottom = rect1.position.y + rect1.size.y;
+        let point1 = rect1.get_world_points();
+        let point2 = rect2.get_world_points();
+        let normals1 = rect1.get_normals();
+        let normals2 = rect2.get_normals();
 
-        let rect2_right = rect2.position.x + rect2.size.x;
-        let rect2_bottom = rect2.position.y + rect2.size.y;
+        let mut smallest_overlap = f32::MAX;
+        let mut smallest_normal = Vector2 { x: 0.0, y: 0.0 };
 
-        let overlap_x =
-            (rect1_right.min(rect2_right) - rect1.position.x.max(rect2.position.x)).max(0.0);
-        let overlap_y =
-            (rect1_bottom.min(rect2_bottom) - rect1.position.y.max(rect2.position.y)).max(0.0);
+        for normal in normals1.iter().chain(normals2.iter()) {
+            let (rect1_min, rect1_max) = Self::project_points_onto_vector(&point1, normal);
+            let (rect2_min, rect2_max) = Self::project_points_onto_vector(&point2, normal);
 
-        if overlap_x <= 0.0 || overlap_y <= 0.0 {
-            return None;
+            if rect1_max < rect2_min || rect2_max < rect1_min {
+                return None;
+            }
+
+            let overlap = rect1_max.min(rect2_max) - rect1_min.max(rect2_min);
+
+            if overlap < smallest_overlap {
+                smallest_overlap = overlap;
+                smallest_normal = *normal;
+            }
         }
 
-        let c1 = Vector2 {
-            x: rect1.position.x + rect1.size.x / 2.0,
-            y: rect1.position.y + rect1.size.y / 2.0,
-        };
+        let direction = rect1.position - rect2.position;
 
-        let c2 = Vector2 {
-            x: rect2.position.x + rect2.size.x / 2.0,
-            y: rect2.position.y + rect2.size.y / 2.0,
-        };
-
-        if overlap_x < overlap_y {
-            let dir = if c1.x < c2.x { 1.0 } else { -1.0 };
-            Some(CollisionResult {
-                correction_vector: Vector2 {
-                    x: dir * overlap_x,
-                    y: 0.0,
-                },
-            })
-        } else {
-            let dir = if c1.y < c2.y { 1.0 } else { -1.0 };
-            Some(CollisionResult {
-                correction_vector: Vector2 {
-                    x: 0.0,
-                    y: dir * overlap_y,
-                },
-            })
+        if direction.dot(smallest_normal) < 0.001 {
+            smallest_normal = -smallest_normal;
         }
+
+        Some(CollisionResult {
+            correction_vector: smallest_normal * smallest_overlap,
+        })
     }
 
     fn rect_vs_circle(rect: &CollisionRect, circle: &CollisionCircle) -> Option<CollisionResult> {
+        let (hx, hy) = (rect.size.x / 2.0, rect.size.y / 2.0);
+
         let closest_x = circle
             .position
             .x
-            .clamp(rect.position.x, rect.position.x + rect.size.x);
+            .clamp(rect.position.x - hx, rect.position.x + hx);
         let closest_y = circle
             .position
             .y
-            .clamp(rect.position.y, rect.position.y + rect.size.y);
+            .clamp(rect.position.y - hy, rect.position.y + hy);
 
         let dx = circle.position.x - closest_x;
         let dy = circle.position.y - closest_y;
@@ -158,38 +261,22 @@ impl CollisionShape {
 
         if dist == 0.0 {
             // circle center is inside rect
-            let half_w = rect.size.x / 2.0;
-            let half_h = rect.size.y / 2.0;
-            let center = Vector2 {
-                x: rect.position.x + half_w,
-                y: rect.position.y + half_h,
-            };
-
             let offset = Vector2 {
-                x: circle.position.x - center.x,
-                y: circle.position.y - center.y,
+                x: circle.position.x - rect.position.x,
+                y: circle.position.y - rect.position.y,
             };
 
-            let px = half_w - offset.x.abs();
-            let py = half_h - offset.y.abs();
+            let px = hx - offset.x.abs();
+            let py = hy - offset.y.abs();
 
-            if px < py {
-                let dir = if offset.x >= 0.0 { 1.0 } else { -1.0 };
-                return Some(CollisionResult {
-                    correction_vector: Vector2 {
-                        x: dir * (circle.radius + px),
-                        y: 0.0,
-                    },
-                });
-            } else {
-                let dir = if offset.y >= 0.0 { 1.0 } else { -1.0 };
-                return Some(CollisionResult {
-                    correction_vector: Vector2 {
-                        x: 0.0,
-                        y: dir * (circle.radius + py),
-                    },
-                });
-            }
+            return Some(CollisionResult {
+                correction_vector: {
+                    Vector2 {
+                        x: if offset.x >= 0.0 { px } else { -px },
+                        y: if offset.y >= 0.0 { py } else { -py },
+                    }
+                },
+            });
         }
 
         let normal = Vector2 {
@@ -206,7 +293,6 @@ impl CollisionShape {
             },
         })
     }
-
     fn circle_vs_circle(
         circle1: &CollisionCircle,
         circle2: &CollisionCircle,
