@@ -175,6 +175,25 @@ impl World {
                     y: circle.position.y + circle.radius,
                 },
             ),
+            CollisionShape::Polygon(polygon) => {
+                let mut min = Vector2 {
+                    x: f32::MAX,
+                    y: f32::MAX,
+                };
+                let mut max = Vector2 {
+                    x: f32::MIN,
+                    y: f32::MIN,
+                };
+
+                for point in &polygon.get_world_points() {
+                    min.x = min.x.min(point.x);
+                    min.y = min.y.min(point.y);
+                    max.x = max.x.max(point.x);
+                    max.y = max.y.max(point.y);
+                }
+
+                (min, max)
+            }
         };
 
         let padding = 3.0; // Add some padding to ensure we get all relevant tiles

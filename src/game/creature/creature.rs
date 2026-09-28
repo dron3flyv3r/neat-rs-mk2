@@ -2,7 +2,7 @@ use sola_raylib::prelude::*;
 
 use crate::game::world::world::{Tile, World};
 use crate::game_engine::collision::{
-    Collision, CollisionCircle, CollisionRect, CollisionResult, CollisionShape,
+    Collision, CollisionCircle, CollisionPolygon, CollisionResult, CollisionShape,
 };
 
 pub struct Creature {
@@ -21,12 +21,13 @@ impl Default for Creature {
         let position = Vector2 { x: 0.0, y: 0.0 };
         let size = 10.0;
 
+        let collision_shape = CollisionShape::Circle(CollisionCircle::new(position, size));
         Self {
             position,
             size,
             color: Color::BLUE,
             speed: 100.0,
-            collision_shape: CollisionShape::Circle(CollisionCircle::new(position, size)),
+            collision_shape,
             base_stats: Stats {
                 health: 100.0,
                 hunger: 100.0,
@@ -70,7 +71,6 @@ impl Creature {
         consumption_rates: ConsumtionRates,
     ) -> Self {
         let colors = [Color::PINK, Color::PURPLE];
-
         let color = *colors.get(rand::random_range(0..colors.len() - 1)).unwrap();
 
         let collision_shape = CollisionShape::Circle(CollisionCircle::new(position, size));
@@ -187,7 +187,7 @@ impl Creature {
 
         for tile in &mut world.get_tile_colliders(&self.collision_shape()) {
             if let Some(c) = self.check_collision_at_position(tile, &test) {
-                test.x += c.correction_vector.x;
+                test.x -= c.correction_vector.x;
             }
         }
         self.position.x = test.x;
@@ -198,7 +198,7 @@ impl Creature {
 
         for tile in &mut world.get_tile_colliders(&self.collision_shape()) {
             if let Some(c) = self.check_collision_at_position(tile, &test) {
-                test.y += c.correction_vector.y;
+                test.y -= c.correction_vector.y;
             }
         }
         self.position.y = test.y;
@@ -209,6 +209,7 @@ impl Collision for Creature {
     fn collision_shape(&mut self) -> CollisionShape {
         let collision_shape = match &mut self.collision_shape {
             CollisionShape::Circle(circle) => circle,
+            // CollisionShape::Circle(circle) => circle,
             _ => panic!("Creature collision shape must be a rectangle"),
         };
         collision_shape.update_position(self.position);
